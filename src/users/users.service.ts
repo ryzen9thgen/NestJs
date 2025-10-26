@@ -11,25 +11,32 @@ import { Pool } from 'mysql2/promise';
 
 @Injectable()
 export class UsersService {
-  private pool: Pool;
+  // 1. Remove 'private pool: Pool;'
+  
+  // 2. Fix the constructor to ONLY inject the service.
+  constructor(private readonly db: DatabaseService) {}
 
-  constructor(private readonly db: DatabaseService) {
+  // 3. Helper function to get the pool (or just call this.db.getPool() directly)
+  private getPool(): Pool {
     const pool = this.db.getPool();
     if (!pool) {
       throw new InternalServerErrorException('Database connection not initialized.');
     }
-    this.pool = pool;
+    return pool;
   }
 
-  // ✅ Create new user (returns id, username, role)
+  // ✅ Create new user
   async createUser(
     username: string,
-    password: string, // This is now the HASH from the controller
+    password: string, 
     email: string,
     role: string,
     gender: string,
   ) {
-    const [rows]: any = await this.pool.query(
+    // 4. Get the pool *inside the method*
+    const pool = this.getPool(); 
+    
+    const [rows]: any = await pool.query(
       'SELECT * FROM users WHERE username = ? OR email = ?',
       [username, email],
     );
@@ -38,15 +45,12 @@ export class UsersService {
       throw new ConflictException('Username or email already exists');
     }
 
-    // ❌ OLD BUG: This line was hashing the hash again.
-    // const hashedPassword = await bcrypt.hash(password, 10);
-
-    const [result]: any = await this.pool.query(
+    const [result]: any = await pool.query(
       'INSERT INTO users (username, password, email, role, gender) VALUES (?, ?, ?, ?, ?)',
-      [username, password, email, role, gender], // ✅ NEW FIX: Save the hash directly
+      [username, password, email, role, gender], 
     );
 
-    const [userRows]: any = await this.pool.query(
+    const [userRows]: any = await pool.query(
       'SELECT id, username, email, role, gender FROM users WHERE id = ?',
       [result.insertId],
     );
@@ -56,7 +60,8 @@ export class UsersService {
 
   // ✅ Find user by username
   async findUserByUsername(username: string) {
-    const [rows]: any = await this.pool.query(
+    const pool = this.getPool(); // Get pool inside the method
+    const [rows]: any = await pool.query(
       'SELECT * FROM users WHERE username = ?',
       [username],
     );
@@ -65,7 +70,8 @@ export class UsersService {
 
   // ✅ Find user by email
   async findUserByEmail(email: string) {
-    const [rows]: any = await this.pool.query(
+    const pool = this.getPool(); // Get pool inside the method
+    const [rows]: any = await pool.query(
       'SELECT * FROM users WHERE email = ?',
       [email],
     );
@@ -73,12 +79,14 @@ export class UsersService {
   }
 
   async findUserById(id: number) {
-    const [rows]: any = await this.pool.query('SELECT * FROM users WHERE id = ?', [id]);
+    const pool = this.getPool(); // Get pool inside the method
+    const [rows]: any = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
     return rows.length > 0 ? rows[0] : null;
   }
 
   async findAll() {
-    const [rows]: any = await this.pool.query(
+    const pool = this.getPool(); // Get pool inside the method
+    const [rows]: any = await pool.query(
       'SELECT id, username, email, role, gender FROM users',
     );
     return rows;
@@ -95,11 +103,12 @@ export class UsersService {
       gender?: string;
     },
   ) {
+    const pool = this.getPool(); // Get pool inside the method
     const existingUser = await this.findUserById(id);
     if (!existingUser) throw new NotFoundException('User not found');
 
     if (partial.username || partial.email) {
-      const [existing]: any = await this.pool.query(
+      const [existing]: any = await pool.query(
         'SELECT * FROM users WHERE (username = ? OR email = ?) AND id != ?',
         [partial.username, partial.email, id],
       );
@@ -135,21 +144,23 @@ export class UsersService {
 
     values.push(id);
     const query = `UPDATE users SET ${updates.join(', ')} WHERE id = ?`;
-    await this.pool.query(query, values);
+    await pool.query(query, values);
 
     return this.findUserById(id);
   }
 
   async deleteUser(id: number) {
-    const [result]: any = await this.pool.query('DELETE FROM users WHERE id = ?', [id]);
+    const pool = this.getPool(); // Get pool inside the method
+    const [result]: any = await pool.query('DELETE FROM users WHERE id = ?', [id]);
     if (result.affectedRows === 0) throw new NotFoundException('User not found');
     return { message: 'User deleted' };
   }
 
   // ✅ Store refresh token securely
   async setRefreshToken(userId: number, refreshToken: string) {
+    const pool = this.getPool(); // Get pool inside the method
     const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
-    await this.pool.query(
+    await pool.query(
       'UPDATE users SET hashedRefreshToken = ? WHERE id = ?',
       [hashedRefreshToken, userId],
     );
@@ -157,6 +168,7 @@ export class UsersService {
 
   // ✅ Verify refresh token
   async getUserIfRefreshTokenMatches(refreshToken: string, userId: number) {
+    const pool = this.getPool(); // Get pool inside the method
     const user = await this.findUserById(userId);
     if (!user || !user.hashedRefreshToken)
       throw new ForbiddenException('Access Denied');
@@ -169,7 +181,8 @@ export class UsersService {
 
   // ✅ Logout (remove refresh token)
   async removeRefreshToken(userId: number) {
-    await this.pool.query(
+    const pool = this.getPool(); // Get pool inside the method
+    await pool.query(
       'UPDATE users SET hashedRefreshToken = NULL WHERE id = ?',
       [userId],
     );
